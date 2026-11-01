@@ -1,0 +1,88 @@
+import { NestFactory } from "@nestjs/core";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+
+import { AppModule } from "@/src/app.module";
+import * as dotenv from "dotenv";
+
+import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import { join } from "path";
+import { ValidationPipe } from "@nestjs/common";
+
+dotenv.config();
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // Static Assets
+  app.useStaticAssets(join(process.cwd(), "uploads"), {
+    prefix: "/uploads/",
+  });
+
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set("trust proxy", true);
+
+  // Helmet
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "validator.swagger.io"],
+          connectSrc: ["'self'"],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+
+  // Logger
+  app.use((req, res, next) => {
+    const now = new Date().toISOString().replace("T", " ").replace(/\..+/, "");
+    console.log(`[HTTP] [${now}] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+
+  // Swagger Configuration
+  const config = new DocumentBuilder()
+    .setTitle("KDex API")
+    .setVersion("1.0")
+    .addBearerAuth()
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup("api", app, document);
+
+  // Cookie Parser
+  const cookieSecret =
+    process.env.COOKIE_SECRET || "fallback-secret-dont-use-in-prod";
+
+  app.use(cookieParser(cookieSecret));
+
+  // CORS Configuration
+  const allowedOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(",").map((origin) => origin.trim())
+    : [];
+
+  app.enableCors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    maxAge: 86400,
+  });
+
+  // Global ValidationPipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  await app.listen(parseInt(process.env.PORT ));
+}
+
+bootstrap();
